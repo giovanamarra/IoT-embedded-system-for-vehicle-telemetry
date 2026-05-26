@@ -1,136 +1,81 @@
-# IoT-embedded-system-for-vehicle-telemetry
-IoT embedded system for real-time vehicle telemetry: an ESP32 reads OBD-II diagnostic data (RPM, speed, engine load, coolant temp) via CAN bus through an MCP2551 transceiver, then transmits the data remotely over 4G (SIM7600) using MQTT/TCP for cloud storage, monitoring, and further analysis.
+# Telemetria Nivus 🏎️
 
-# 🚗 OBD-II Vehicle Telemetry System
+Sistema de telemetria automotiva: lê dados OBD-II do Nivus 2021, envia via 2G/GPRS por MQTT e exibe num dashboard web ao vivo.
 
-![Platform](https://img.shields.io/badge/platform-ESP32-blue)
-![Protocol](https://img.shields.io/badge/protocol-CAN%20%7C%20OBD--II-orange)
-![Connectivity](https://img.shields.io/badge/connectivity-4G%20%7C%20MQTT-green)
-![License](https://img.shields.io/badge/license-MIT-yellow)
-![Status](https://img.shields.io/badge/status-in%20development-red)
-
-> An IoT embedded system for real-time vehicle data acquisition and remote monitoring, built around the ESP32 and the OBD-II/CAN bus protocol.
-
----
-
-## 📖 Overview
-
-This project implements a connected embedded system that plugs directly into a vehicle's standard **OBD-II port** to capture real-time diagnostic data from the **ECU (Engine Control Unit)** via the **CAN bus**. The data is processed locally on an **ESP32** microcontroller and transmitted remotely over **4G (SIM7600)** using the **MQTT** protocol, enabling continuous telemetry, remote monitoring, and post-trip analysis.
-
-The system is designed for applications such as **fleet management**, **predictive maintenance**, **driver behavior analysis**, and **automotive performance monitoring**.
-
----
-
-## ✨ Features
-
-- 🔌 **Direct OBD-II / CAN bus access** — reads ECU data without intermediary chips (ELM327-free)
-- ⚡ **Real-time processing** — dual-core ESP32 separates CAN reading from 4G transmission
-- 📡 **Remote telemetry** — MQTT over 4G LTE with latency under 100 ms
-- 💾 **Local storage** — data persistence even with no network coverage
-- 🔋 **Self-powered** — runs from the vehicle's 12V OBD-II line, no external battery needed
-- 📊 **Multi-parameter capture** — RPM, vehicle speed, coolant temperature, engine load, throttle position, intake air temperature, and DTCs
-
----
-
-## 🛠️ Hardware Architecture
-
-| Component | Role |
-|-----------|------|
-| **ESP32 DevKit** | Main microcontroller (dual-core, native TWAI/CAN controller) |
-| **MCP2551 / SN65HVD230** | High-speed CAN bus transceiver (physical layer) |
-| **SIM7600 4G Module** | Cellular communication via UART/AT commands |
-| **DC-DC Buck Converter** | Steps 12V automotive supply down to 5V |
-| **LDO Regulator** | Provides stable 3.3V rail for the ESP32 |
-| **OBD-II Connector** | Standard SAE J1962 16-pin automotive interface |
-
-### Power Chain
-`12V (OBD-II) → Buck Converter → 5V (SIM7600) → LDO → 3.3V (ESP32)`
-
----
-
-## 📡 Communication Protocols
-
-- **CAN bus (ISO 11898)** — up to 1 Mbps, differential signaling (CAN-H / CAN-L)
-- **OBD-II (ISO 15765)** — standardized diagnostic layer running over CAN
-- **MQTT over TCP/IP** — lightweight publish/subscribe protocol for IoT
-- **UART + AT commands** — host-to-modem communication with the SIM7600
-
-### Supported OBD-II PIDs (Mode 01)
-
-| PID | Parameter | Formula | Unit |
-|-----|-----------|---------|------|
-| `0C` | Engine RPM | `(256·A + B) / 4` | RPM |
-| `0D` | Vehicle Speed | `A` | km/h |
-| `05` | Coolant Temperature | `A − 40` | °C |
-| `04` | Calculated Engine Load | `(100/255) · A` | % |
-| `11` | Throttle Position | `(100/255) · A` | % |
-| `0F` | Intake Air Temperature | `A − 40` | °C |
-
----
-
-## 🔄 System Flow
+## Arquitetura
 
 ```
-[Vehicle ECU] → [CAN Bus] → [MCP2551] → [ESP32 / TWAI]
-                                              ↓
-                                    [Decode + Filter + JSON]
-                                              ↓
-                                    [SIM7600 / MQTT / 4G]
-                                              ↓
-                                       [Remote Server]
+Carro → CAN bus → MCP2515 → Arduino Mega → SIM800L → 2G/GPRS
+                                                          ↓
+                                                   Broker MQTT (HiveMQ)
+                                                          ↓
+                                                   Backend Python
+                                                    ↓         ↓
+                                                  SQLite   WebSocket
+                                                              ↓
+                                                         Dashboard
 ```
 
-Core 0 handles CAN frame acquisition; Core 1 manages the 4G uplink — maximizing throughput and keeping real-time guarantees.
+## Setup
 
----
+### 1. Arduino
 
-## 📁 Repository Structure
+**Bibliotecas necessárias** (Library Manager):
+- `mcp_can` (coryjfowler)
 
+**Antes de gravar, edite no `.ino`:**
+- `APN`, `APN_USER`, `APN_PASS` → conforme sua operadora do chip:
+  - Claro:  `claro.com.br` / `claro` / `claro`
+  - Vivo:   `zap.vivo.com.br` / `vivo` / `vivo`
+  - TIM:    `tim.br` / `tim` / `tim`
+  - Oi:     `gprs.oi.com.br` / `oi` / `oi`
+- `MQTT_TOPIC` → mude `nivus/gi/telemetria` pra algo único (o broker é público, qualquer um pode escutar!)
+- `MQTT_CLIENT` → use um ID único também
+
+### 2. Backend Python
+
+```bash
+cd backend
+pip install -r requirements.txt
+python app.py
 ```
-.
-├── src/              # Firmware source code (ESP32)
-├── docs/             # Project documentation & diagrams
-├── hardware/         # Schematics and PCB files
-└── README.md
+
+**Importante:** edite `MQTT_TOPIC` no `app.py` pra ser o **mesmo** do Arduino.
+
+Acessa: http://localhost:5000
+
+### 3. Testando sem o carro
+
+Se quer testar o dashboard antes de ir pro carro, instala o `mosquitto-clients` e publica manualmente:
+
+```bash
+# Em outro terminal:
+mosquitto_pub -h broker.hivemq.com -t "nivus/gi/telemetria" \
+  -m '{"rpm":2500,"vel":60,"temp":85,"throttle":35.5,"ts":12345}'
 ```
 
----
+O dashboard deve mostrar o valor na hora.
 
-## 🚀 Getting Started
+## Cuidados importantes
 
-> ⚠️ Work in progress — setup instructions will be added as the firmware evolves.
+### SIM800L
 
-### Prerequisites
-- Arduino IDE or PlatformIO
-- ESP32 board support package
-- Libraries: `driver/twai.h` (built-in), `PubSubClient`, `ArduinoJson`
+- **Alimentação:** precisa de fonte externa 3.7-4.2V capaz de fornecer **picos de 2A**. NUNCA alimente pelo Arduino — vai resetar.
+- **Antena:** sem antena = sem sinal. Use a helicoidal que vem no kit.
+- **Divisor de tensão no RX:** o pino RX do SIM800L é 3V, e o TX do Mega é 5V. Use divisor resistivo (10kΩ + 20kΩ) ou queima.
 
----
+### Cobertura 2G
 
-## 📚 References
+O SIM800L só funciona em 2G. Antes de testar em movimento, confirma que tem 2G na sua região — em algumas cidades brasileiras já foi desligado. Faz teste estático primeiro.
 
-- ISO 15765 — Diagnostic Communication over CAN
-- ISO 9141-2 / KWP2000 — Legacy OBD protocols
-- Microchip MCP2551 / TI SN65HVD230 datasheets
-- Espressif ESP32 TWAI driver documentation
+### Broker público
 
----
+O `broker.hivemq.com` é gratuito e sem autenticação — qualquer um que souber o tópico pode ler seus dados. Pra produção, considera HiveMQ Cloud (free tier com auth) ou Mosquitto self-hosted.
 
-## 👥 Authors
+## Próximos passos
 
-**Giovana Marra e Pimenta**
-[![GitHub](https://img.shields.io/badge/GitHub-giovanamarra-181717?logo=github)](https://github.com/giovanamarra)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-giovanamarraepimenta-0A66C2?logo=linkedin)](https://linkedin.com/in/giovanamarraepimenta)
-
-**Lucas Tergilene Furtado**
-[![GitHub](https://img.shields.io/badge/GitHub-lucastergi-181717?logo=github)](https://github.com/lucastergi)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-lucastergilene-0A66C2?logo=linkedin)](https://linkedin.com/in/lucastergilene)
-
-Academic project — Embedded Systems & IoT
-Computer Engineering
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+- [ ] Adicionar mais PIDs (MAF, pressão coletor, consumo instantâneo)
+- [ ] GPS no SIM800L (ele tem!) pra registrar rota
+- [ ] Autenticação no MQTT
+- [ ] Exportar viagens em CSV/GPX
+- [ ] OTA pra atualizar firmware sem cabo

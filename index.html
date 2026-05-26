@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telemetria Nivus 🏎️</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f1117;
+      color: #e8e8e8;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #2a2d3a;
+    }
+    h1 { font-size: 1.5rem; }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+    }
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #ef4444;
+      transition: background 0.3s;
+    }
+    .dot.online { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+    
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .tab {
+      padding: 10px 20px;
+      background: #1a1d29;
+      border: 1px solid #2a2d3a;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab.active { background: #3b82f6; border-color: #3b82f6; }
+    .tab:hover:not(.active) { background: #252836; }
+    
+    .panel { display: none; }
+    .panel.active { display: block; }
+    
+    .gauges {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .gauge {
+      background: linear-gradient(135deg, #1a1d29 0%, #232735 100%);
+      padding: 20px;
+      border-radius: 12px;
+      border: 1px solid #2a2d3a;
+      position: relative;
+      overflow: hidden;
+    }
+    .gauge::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 3px;
+      background: var(--accent, #3b82f6);
+    }
+    .gauge .label {
+      font-size: 0.8rem;
+      color: #8b8e9b;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+    .gauge .value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--accent, #3b82f6);
+    }
+    .gauge .unit { font-size: 1rem; color: #8b8e9b; margin-left: 4px; }
+    
+    .chart-container {
+      background: #1a1d29;
+      padding: 20px;
+      border-radius: 12px;
+      border: 1px solid #2a2d3a;
+      margin-bottom: 16px;
+      height: 300px;
+    }
+    
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      align-items: center;
+    }
+    select, button {
+      padding: 8px 16px;
+      background: #1a1d29;
+      color: #e8e8e8;
+      border: 1px solid #2a2d3a;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover { background: #252836; }
+    
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .stat {
+      background: #1a1d29;
+      padding: 14px;
+      border-radius: 8px;
+      border-left: 3px solid #3b82f6;
+    }
+    .stat .label { font-size: 0.75rem; color: #8b8e9b; }
+    .stat .value { font-size: 1.4rem; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🏎️ Telemetria Nivus</h1>
+    <div class="status">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">Aguardando dados...</span>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-panel="ao-vivo">📊 Ao Vivo</div>
+    <div class="tab" data-panel="historico">📈 Histórico</div>
+  </div>
+
+  <!-- ============ PAINEL AO VIVO ============ -->
+  <div class="panel active" id="ao-vivo">
+    <div class="gauges">
+      <div class="gauge" style="--accent: #3b82f6;">
+        <div class="label">RPM</div>
+        <div class="value"><span id="g-rpm">0</span></div>
+      </div>
+      <div class="gauge" style="--accent: #10b981;">
+        <div class="label">Velocidade</div>
+        <div class="value"><span id="g-vel">0</span><span class="unit">km/h</span></div>
+      </div>
+      <div class="gauge" style="--accent: #f59e0b;">
+        <div class="label">Temperatura</div>
+        <div class="value"><span id="g-temp">0</span><span class="unit">°C</span></div>
+      </div>
+      <div class="gauge" style="--accent: #ec4899;">
+        <div class="label">Acelerador</div>
+        <div class="value"><span id="g-throttle">0</span><span class="unit">%</span></div>
+      </div>
+    </div>
+    
+    <div class="chart-container">
+      <canvas id="chart-ao-vivo"></canvas>
+    </div>
+  </div>
+
+  <!-- ============ PAINEL HISTÓRICO ============ -->
+  <div class="panel" id="historico">
+    <div class="controls">
+      <label>Intervalo:</label>
+      <select id="filtro-minutos">
+        <option value="5">Últimos 5 min</option>
+        <option value="30" selected>Últimos 30 min</option>
+        <option value="60">Última 1 hora</option>
+        <option value="360">Últimas 6 horas</option>
+        <option value="1440">Últimas 24 horas</option>
+      </select>
+      <button onclick="carregarHistorico()">🔄 Atualizar</button>
+    </div>
+    
+    <div class="stats" id="stats-historico"></div>
+    
+    <div class="chart-container">
+      <canvas id="chart-historico"></canvas>
+    </div>
+  </div>
+
+<script>
+// ============ TROCA DE ABAS ============
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.panel).classList.add('active');
+    if (tab.dataset.panel === 'historico') carregarHistorico();
+  });
+});
+
+// ============ GRÁFICO AO VIVO ============
+const MAX_PONTOS = 30;
+const ctxLive = document.getElementById('chart-ao-vivo').getContext('2d');
+const chartLive = new Chart(ctxLive, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'RPM',          data: [], borderColor: '#3b82f6', tension: 0.3, yAxisID: 'y1' },
+      { label: 'Velocidade',   data: [], borderColor: '#10b981', tension: 0.3, yAxisID: 'y2' },
+      { label: 'Acelerador %', data: [], borderColor: '#ec4899', tension: 0.3, yAxisID: 'y2' },
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 300 },
+    plugins: { legend: { labels: { color: '#e8e8e8' } } },
+    scales: {
+      x: { ticks: { color: '#8b8e9b' }, grid: { color: '#2a2d3a' } },
+      y1: { position: 'left',  ticks: { color: '#3b82f6' }, grid: { color: '#2a2d3a' }, title: { display: true, text: 'RPM', color: '#3b82f6' } },
+      y2: { position: 'right', ticks: { color: '#10b981' }, grid: { drawOnChartArea: false }, title: { display: true, text: 'km/h | %', color: '#10b981' } }
+    }
+  }
+});
+
+// ============ WEBSOCKET ============
+const socket = io();
+let ultimoRecebido = 0;
+
+socket.on('connect', () => {
+  document.getElementById('status-dot').classList.add('online');
+  document.getElementById('status-text').textContent = 'Conectado ao servidor';
+});
+
+socket.on('telemetria', (dados) => {
+  ultimoRecebido = Date.now();
+  
+  // Atualiza gauges
+  document.getElementById('g-rpm').textContent      = dados.rpm;
+  document.getElementById('g-vel').textContent      = dados.vel;
+  document.getElementById('g-temp').textContent     = dados.temp;
+  document.getElementById('g-throttle').textContent = dados.throttle.toFixed(1);
+  
+  // Atualiza gráfico
+  const agora = new Date().toLocaleTimeString('pt-BR');
+  chartLive.data.labels.push(agora);
+  chartLive.data.datasets[0].data.push(dados.rpm);
+  chartLive.data.datasets[1].data.push(dados.vel);
+  chartLive.data.datasets[2].data.push(dados.throttle);
+  
+  // Limita janela móvel
+  if (chartLive.data.labels.length > MAX_PONTOS) {
+    chartLive.data.labels.shift();
+    chartLive.data.datasets.forEach(d => d.data.shift());
+  }
+  chartLive.update();
+  
+  document.getElementById('status-text').textContent = 'Recebendo dados ao vivo';
+});
+
+// Detecta se parou de receber
+setInterval(() => {
+  if (Date.now() - ultimoRecebido > 10000 && ultimoRecebido > 0) {
+    document.getElementById('status-text').textContent = 'Sem dados recentes';
+  }
+}, 3000);
+
+// ============ HISTÓRICO ============
+let chartHist = null;
+
+async function carregarHistorico() {
+  const minutos = document.getElementById('filtro-minutos').value;
+  
+  // Busca leituras + estatísticas em paralelo
+  const [leituras, stats] = await Promise.all([
+    fetch(`/api/historico?minutos=${minutos}&limit=1000`).then(r => r.json()),
+    fetch(`/api/estatisticas`).then(r => r.json())
+  ]);
+  
+  // Renderiza estatísticas
+  document.getElementById('stats-historico').innerHTML = `
+    <div class="stat"><div class="label">Total de leituras</div><div class="value">${stats.total_leituras || 0}</div></div>
+    <div class="stat"><div class="label">RPM máximo</div><div class="value">${stats.rpm_max || 0}</div></div>
+    <div class="stat"><div class="label">RPM médio</div><div class="value">${Math.round(stats.rpm_medio || 0)}</div></div>
+    <div class="stat"><div class="label">Velocidade máx</div><div class="value">${stats.vel_max || 0} km/h</div></div>
+    <div class="stat"><div class="label">Velocidade média</div><div class="value">${Math.round(stats.vel_media || 0)} km/h</div></div>
+    <div class="stat"><div class="label">Temperatura máx</div><div class="value">${stats.temp_max || 0}°C</div></div>
+  `;
+  
+  // Inverte (vem em ordem decrescente, gráfico precisa crescente)
+  leituras.reverse();
+  const labels = leituras.map(l => new Date(l.ts_servidor).toLocaleTimeString('pt-BR'));
+  
+  if (chartHist) chartHist.destroy();
+  chartHist = new Chart(document.getElementById('chart-historico').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'RPM',         data: leituras.map(l => l.rpm),         borderColor: '#3b82f6', tension: 0.2, pointRadius: 0, yAxisID: 'y1' },
+        { label: 'Velocidade',  data: leituras.map(l => l.velocidade),  borderColor: '#10b981', tension: 0.2, pointRadius: 0, yAxisID: 'y2' },
+        { label: 'Temperatura', data: leituras.map(l => l.temperatura), borderColor: '#f59e0b', tension: 0.2, pointRadius: 0, yAxisID: 'y2' },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#e8e8e8' } } },
+      scales: {
+        x: { ticks: { color: '#8b8e9b', maxTicksLimit: 10 }, grid: { color: '#2a2d3a' } },
+        y1: { position: 'left',  ticks: { color: '#3b82f6' }, grid: { color: '#2a2d3a' } },
+        y2: { position: 'right', ticks: { color: '#10b981' }, grid: { drawOnChartArea: false } }
+      }
+    }
+  });
+}
+</script>
+</body>
+</html>
