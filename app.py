@@ -11,7 +11,7 @@ Como rodar:
     pip install -r requirements.txt
     python app.py
 
-Acessa: http://localhost:5000
+Acessa: http://localhost:5003
 """
 
 import json
@@ -27,9 +27,11 @@ from flask_socketio import SocketIO
 # =====================================================
 # CONFIGURAÇÕES (devem bater com o Arduino!)
 # =====================================================
-MQTT_BROKER = "broker.hivemq.com"
+MQTT_BROKER = "linux.etmg.com.br"
 MQTT_PORT   = 1883
-MQTT_TOPIC  = "nivus/gi/telemetria"   # << MESMO TÓPICO DO ARDUINO
+MQTT_USER   = "giovana"
+MQTT_PASS   = "ibmec2026"
+MQTT_TOPIC  = "ibmec/dados/status"   # << MESMO TÓPICO DO ARDUINO
 
 DB_PATH = Path(__file__).parent / "telemetria.db"
 
@@ -97,9 +99,9 @@ def historico():
     """
     minutos = int(request.args.get("minutos", 30))
     limit   = int(request.args.get("limit", 500))
-    
+
     desde = datetime.now() - timedelta(minutes=minutos)
-    
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
@@ -110,7 +112,7 @@ def historico():
         LIMIT ?
     """, (desde, limit)).fetchall()
     conn.close()
-    
+
     return jsonify([dict(r) for r in rows])
 
 
@@ -120,7 +122,7 @@ def estatisticas():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     desde = datetime.now() - timedelta(minutes=30)
-    
+
     row = conn.execute("""
         SELECT
             COUNT(*)             AS total_leituras,
@@ -134,7 +136,7 @@ def estatisticas():
         WHERE ts_servidor >= ?
     """, (desde,)).fetchone()
     conn.close()
-    
+
     return jsonify(dict(row) if row else {})
 
 
@@ -146,6 +148,10 @@ def on_connect(client, userdata, flags, rc):
         print(f"[MQTT] Conectado ao broker {MQTT_BROKER}")
         client.subscribe(MQTT_TOPIC)
         print(f"[MQTT] Inscrito em '{MQTT_TOPIC}'")
+    elif rc == 4:
+        print("[MQTT] Usuário/senha incorretos!")
+    elif rc == 5:
+        print("[MQTT] Não autorizado — confere as credenciais no broker")
     else:
         print(f"[MQTT] Falha na conexão, código {rc}")
 
@@ -156,14 +162,14 @@ def on_message(client, userdata, msg):
         payload = msg.payload.decode("utf-8")
         dados = json.loads(payload)
         print(f"[MQTT] RX: {dados}")
-        
+
         # 1) Grava no banco
         salvar_leitura(dados)
-        
+
         # 2) Empurra pro frontend em tempo real
         dados["recebido_em"] = datetime.now().isoformat()
         socketio.emit("telemetria", dados)
-        
+
     except json.JSONDecodeError as e:
         print(f"[MQTT] Payload inválido: {msg.payload} - {e}")
     except Exception as e:
@@ -171,7 +177,11 @@ def on_message(client, userdata, msg):
 
 
 def iniciar_mqtt():
-    client = mqtt.Client(client_id="backend_nivus")
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
+        client_id="backend_nivus",
+    )
+    client.username_pw_set(MQTT_USER, MQTT_PASS)
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
@@ -183,10 +193,10 @@ def iniciar_mqtt():
 # =====================================================
 if __name__ == "__main__":
     init_db()
-    
+
     # MQTT roda em thread separado pra não travar o Flask
     mqtt_thread = threading.Thread(target=iniciar_mqtt, daemon=True)
     mqtt_thread.start()
-    
-    print("[WEB] Servidor em http://localhost:5000")
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
+
+    print("[WEB] Servidor em http://localhost:5003")
+    socketio.run(app, host="0.0.0.0", port=5003, debug=False, allow_unsafe_werkzeug=True)

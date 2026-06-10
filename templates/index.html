@@ -241,6 +241,11 @@ socket.on('connect', () => {
   document.getElementById('status-text').textContent = 'Conectado ao servidor';
 });
 
+socket.on('disconnect', () => {
+  document.getElementById('status-dot').classList.remove('online');
+  document.getElementById('status-text').textContent = 'Desconectado do servidor';
+});
+
 socket.on('telemetria', (dados) => {
   ultimoRecebido = Date.now();
   
